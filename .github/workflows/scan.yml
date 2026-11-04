@@ -1,0 +1,67 @@
+name: 🔍 Username Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Username to search"
+        required: true
+        type: string
+      no_nsfw:
+        description: "Skip NSFW sites"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install openpyxl
+
+      - name: Run scan
+        run: |
+          FLAGS="--username ${{ inputs.username }} --json --csv"
+          if [ "${{ inputs.no_nsfw }}" = "true" ]; then
+            FLAGS="$FLAGS --no-nsfw"
+          fi
+          python blackbird.py $FLAGS || true
+
+      - name: Convert CSV to Excel
+        run: |
+          python -c "
+          import glob, csv, openpyxl
+          for f in glob.glob('results/*.csv'):
+              wb = openpyxl.Workbook()
+              ws = wb.active
+              ws.title = 'Scan Results'
+              with open(f) as c:
+                  for row in csv.reader(c):
+                      ws.append(row)
+              # Auto-width columns
+              for col in ws.columns:
+                  mx = max(len(str(cell.value or '')) for cell in col)
+                  ws.column_dimensions[col[0].column_letter].width = min(mx + 2, 50)
+              # Bold header
+              for cell in ws[1]:
+                  cell.font = openpyxl.styles.Font(bold=True)
+              wb.save(f.replace('.csv', '.xlsx'))
+          "
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-${{ inputs.username }}-${{ github.run_number }}
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
